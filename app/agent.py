@@ -17,6 +17,8 @@ import datetime
 
 from google.adk.agents import Agent
 from google.adk.apps import App
+from google.adk.apps.app import EventsCompactionConfig
+from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
 from google.adk.models import Gemini
 from google.genai import types
 
@@ -28,6 +30,7 @@ from app.tools import (
     update_event,
 )
 
+from google.adk.agents.callback_context import CallbackContext
 
 MODEL = "gemini-3.7-flash"
 
@@ -64,6 +67,11 @@ AUTHENTICATION:
 - If any tool returns a status indicating credentials are pending or authentication is required, politely inform the user that access to their Google Calendar needs to be authorized.
 """
 
+# Define the callback that triggers Memory Bank extraction
+async def add_session_to_memory_callback(callback_context: CallbackContext):
+    await callback_context.add_session_to_memory()
+    return None
+
 
 root_agent = Agent(
     name="root_agent",
@@ -79,9 +87,22 @@ root_agent = Agent(
         update_event,
         delete_event,
     ],
+     # Register the callback so it fires after every interaction
+    after_agent_callback=[add_session_to_memory_callback],
 )
 
 app = App(
     root_agent=root_agent,
     name="app",
+    events_compaction_config=EventsCompactionConfig(
+        token_threshold=32000,
+        event_retention_size=5,
+        summarizer=LlmEventSummarizer(
+            llm=Gemini(
+                model=MODEL,
+                retry_options=types.HttpRetryOptions(attempts=3),
+            )
+        ),
+    ),
 )
+

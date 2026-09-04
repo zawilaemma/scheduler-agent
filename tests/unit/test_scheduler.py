@@ -14,8 +14,10 @@
 
 """Unit tests for scheduler-agent tools, validation, and safety constraints."""
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
 
 from app.agent import app, root_agent
 from app.tools import (
@@ -53,6 +55,61 @@ def test_agent_structure():
     assert "delete_event" in tool_names
 
 
+def test_context_compaction_configured():
+    """Verify context compaction is configured on the app."""
+    assert app.events_compaction_config is not None
+    config = app.events_compaction_config
+    assert config.token_threshold == 32000
+    assert config.event_retention_size == 5
+    assert config.summarizer is not None
+    assert isinstance(config.summarizer, LlmEventSummarizer)
+
+
+@pytest.mark.asyncio
+async def test_context_compaction_summarizer():
+    """Verify the event summarizer creates a compacted event with model summary."""
+    from google.adk.events.event import Event
+    from google.genai import types
+
+    mock_llm = MagicMock()
+    mock_llm.model = "gemini-3.7-flash"
+
+    async def fake_generate(req, stream=False):
+        response = MagicMock()
+        response.content = types.Content(
+            role="model",
+            parts=[types.Part.from_text(text="Compacted summary: user asked for schedule.")],
+        )
+        response.usage_metadata = types.GenerateContentResponseUsageMetadata(
+            prompt_token_count=100,
+            candidates_token_count=50,
+            total_token_count=150,
+        )
+        yield response
+
+    mock_llm.generate_content_async = fake_generate
+    summarizer = LlmEventSummarizer(llm=mock_llm)
+
+    events = [
+        Event(
+            author="user",
+            content=types.Content(role="user", parts=[types.Part.from_text(text="Hello")]),
+        ),
+        Event(
+            author="root_agent",
+            content=types.Content(role="model", parts=[types.Part.from_text(text="Hi there")]),
+        ),
+    ]
+
+    compacted = await summarizer.maybe_summarize_events(events=events)
+    assert compacted is not None
+    assert compacted.actions.compaction is not None
+    assert (
+        compacted.actions.compaction.compacted_content.parts[0].text
+        == "Compacted summary: user asked for schedule."
+    )
+
+
 def test_safety_guardrail_unconfirmed_create():
     """Verify creating an event without confirmation is rejected with pending_confirmation."""
     ctx = DummyToolContext(state={"mock_calendar": True})
@@ -73,7 +130,7 @@ def test_safety_guardrail_unconfirmed_create():
 def test_create_and_list_event_flow():
     """Verify event creation with confirmation and subsequent listing."""
     ctx = DummyToolContext(state={"mock_calendar": True})
-    
+
     # Create with confirmed=True
     create_res = create_event(
         summary="Architecture Review",
@@ -103,7 +160,7 @@ def test_create_and_list_event_flow():
 def test_check_availability_conflicts():
     """Verify check_availability reports conflicts when slots overlap."""
     ctx = DummyToolContext(state={"mock_calendar": True})
-    
+
     # Book 14:00 - 15:00
     create_event(
         summary="Existing Meeting",
@@ -139,7 +196,7 @@ def test_check_availability_conflicts():
 def test_update_and_delete_event():
     """Verify updating and deleting events with confirmation."""
     ctx = DummyToolContext(state={"mock_calendar": True})
-    
+
     # Create event
     created = create_event(
         summary="1-on-1 Sync",
