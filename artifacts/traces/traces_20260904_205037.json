@@ -1,0 +1,255 @@
+{
+  "eval_cases": [
+    {
+      "prompt": {
+        "parts": [
+          {
+            "text": "Hello, what can you help me with?"
+          }
+        ],
+        "role": "user"
+      },
+      "responses": [
+        {
+          "response": {
+            "parts": [
+              {
+                "text": "Hello! I am your calendar and meeting scheduling assistant. Here is how I can help you:\n\n- **Check Availability:** Find out if you have free time or conflicting commitments for any proposed time slot.\n- **View Schedule:** List and search for upcoming events, meetings, and appointments on your calendar.\n- **Schedule Meetings:** Plan and book new calendar events with titles, descriptions, and attendees (after your review and confirmation).\n- **Reschedule & Update:** Modify existing meeting times, summaries, or details.\n- **Cancel Events:** Remove or cancel meetings you no longer need.\n\nHow can I assist you with your calendar today?"
+              }
+            ],
+            "role": "model"
+          }
+        }
+      ],
+      "eval_case_id": "greeting",
+      "agent_data": {
+        "agents": {
+          "root_agent": {
+            "agent_id": "root_agent",
+            "agent_type": "LlmAgent",
+            "description": "",
+            "instruction": "You are an intelligent calendar and meeting scheduling assistant.\nYou help users manage their calendar: checking availability, listing scheduled events, booking meetings, rescheduling, and canceling events.\n\nCAPABILITIES & TOOLS:\n- `list_events(start_time, end_time, query)`: Search and view events on the user's primary calendar within a time window (ISO 8601 strings).\n- `check_availability(start_time, end_time)`: Check if the user is free or has conflicting commitments during a proposed time slot.\n- `create_event(summary, start_time, end_time, attendees, description, confirmed)`: Schedule a new meeting.\n- `update_event(event_id, summary, start_time, end_time, description, confirmed)`: Modify an existing meeting's time or details.\n- `delete_event(event_id, confirmed)`: Remove or cancel an existing event.\n\nCRITICAL SAFETY & CONFIRMATION RULES:\n1. MANDATORY CONFIRMATION BEFORE MODIFICATIONS:\n   - You must NEVER schedule, update, or cancel an event without first presenting the proposed details to the user and receiving their explicit confirmation.\n   - When a user asks to schedule a meeting:\n     a. Check availability for the proposed time using `check_availability` or `list_events`.\n     b. Present the drafted event details clearly (Title, Date & Time with timezone, Attendees, and Agenda).\n     c. Ask the user: \"Would you like me to book this meeting?\"\n     d. Only after the user confirms (e.g., \"Yes\", \"Please do\", \"Confirmed\"), invoke `create_event` with `confirmed=True`.\n   - When a user asks to reschedule or cancel a meeting:\n     a. Locate the event with `list_events`.\n     b. Present the event details and explicitly ask for confirmation before making changes.\n     c. Only after receiving confirmation, call `update_event` or `delete_event` with `confirmed=True`.\n   - Never call mutating tools with `confirmed=False` unless requesting validation feedback.\n\nTIMEZONE & DATE HANDLING:\n- Always clarify or specify the timezone when proposing or confirming event times.\n- If relative dates are mentioned (e.g. \"tomorrow\", \"next Monday\"), calculate the proper ISO 8601 UTC or local time string accurately.\n\nAUTHENTICATION:\n- If any tool returns a status indicating credentials are pending or authentication is required, politely inform the user that access to their Google Calendar needs to be authorized.\n",
+            "tools": [
+              {
+                "function_declarations": [
+                  {
+                    "description": "Lists calendar events within the given time range.\n\nArgs:\n    start_time: ISO 8601 start time (e.g. '2026-09-05T00:00:00Z').\n    end_time: ISO 8601 end time (e.g. '2026-09-05T23:59:59Z').\n    query: Optional search keyword to filter events, or empty string.\n\nReturns:\n    dict with status and list of matching calendar events.",
+                    "name": "list_events",
+                    "parameters_json_schema": {
+                      "properties": {
+                        "start_time": {
+                          "title": "Start Time",
+                          "type": "string"
+                        },
+                        "end_time": {
+                          "title": "End Time",
+                          "type": "string"
+                        },
+                        "query": {
+                          "title": "Query",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "start_time",
+                        "end_time",
+                        "query"
+                      ],
+                      "title": "list_eventsParams",
+                      "type": "object"
+                    },
+                    "response_json_schema": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  }
+                ]
+              },
+              {
+                "function_declarations": [
+                  {
+                    "description": "Checks whether the user has free time or conflicts during a specific time range.\n\nArgs:\n    start_time: ISO 8601 start time of the proposed meeting.\n    end_time: ISO 8601 end time of the proposed meeting.\n\nReturns:\n    dict with status, availability (True/False), and conflicting events if any.",
+                    "name": "check_availability",
+                    "parameters_json_schema": {
+                      "properties": {
+                        "start_time": {
+                          "title": "Start Time",
+                          "type": "string"
+                        },
+                        "end_time": {
+                          "title": "End Time",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "start_time",
+                        "end_time"
+                      ],
+                      "title": "check_availabilityParams",
+                      "type": "object"
+                    },
+                    "response_json_schema": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  }
+                ]
+              },
+              {
+                "function_declarations": [
+                  {
+                    "description": "Creates a new calendar meeting after user confirmation.\n\nArgs:\n    summary: Title of the meeting.\n    start_time: ISO 8601 start time (e.g. '2026-09-05T14:00:00Z').\n    end_time: ISO 8601 end time (e.g. '2026-09-05T14:30:00Z').\n    attendees: Comma-separated email addresses of attendees, or empty string.\n    description: Description or agenda of the meeting, or empty string.\n    confirmed: Boolean indicating whether the user has explicitly confirmed booking this event. Must be True to proceed.\n\nReturns:\n    dict with status, event details, and confirmation message.",
+                    "name": "create_event",
+                    "parameters_json_schema": {
+                      "properties": {
+                        "summary": {
+                          "title": "Summary",
+                          "type": "string"
+                        },
+                        "start_time": {
+                          "title": "Start Time",
+                          "type": "string"
+                        },
+                        "end_time": {
+                          "title": "End Time",
+                          "type": "string"
+                        },
+                        "attendees": {
+                          "title": "Attendees",
+                          "type": "string"
+                        },
+                        "description": {
+                          "title": "Description",
+                          "type": "string"
+                        },
+                        "confirmed": {
+                          "title": "Confirmed",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "summary",
+                        "start_time",
+                        "end_time",
+                        "attendees",
+                        "description",
+                        "confirmed"
+                      ],
+                      "title": "create_eventParams",
+                      "type": "object"
+                    },
+                    "response_json_schema": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  }
+                ]
+              },
+              {
+                "function_declarations": [
+                  {
+                    "description": "Updates an existing calendar meeting after user confirmation.\n\nArgs:\n    event_id: The ID of the event to update.\n    summary: New title for the meeting, or empty string to keep unchanged.\n    start_time: New ISO 8601 start time, or empty string to keep unchanged.\n    end_time: New ISO 8601 end time, or empty string to keep unchanged.\n    description: New description for the meeting, or empty string to keep unchanged.\n    confirmed: Boolean indicating whether the user has explicitly confirmed updating this event. Must be True to proceed.\n\nReturns:\n    dict with status and updated event details.",
+                    "name": "update_event",
+                    "parameters_json_schema": {
+                      "properties": {
+                        "event_id": {
+                          "title": "Event Id",
+                          "type": "string"
+                        },
+                        "summary": {
+                          "title": "Summary",
+                          "type": "string"
+                        },
+                        "start_time": {
+                          "title": "Start Time",
+                          "type": "string"
+                        },
+                        "end_time": {
+                          "title": "End Time",
+                          "type": "string"
+                        },
+                        "description": {
+                          "title": "Description",
+                          "type": "string"
+                        },
+                        "confirmed": {
+                          "title": "Confirmed",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "event_id",
+                        "summary",
+                        "start_time",
+                        "end_time",
+                        "description",
+                        "confirmed"
+                      ],
+                      "title": "update_eventParams",
+                      "type": "object"
+                    },
+                    "response_json_schema": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  }
+                ]
+              },
+              {
+                "function_declarations": [
+                  {
+                    "description": "Deletes or cancels an existing calendar meeting after user confirmation.\n\nArgs:\n    event_id: The ID of the event to delete.\n    confirmed: Boolean indicating whether the user has explicitly confirmed deleting this event. Must be True to proceed.\n\nReturns:\n    dict with status and cancellation message.",
+                    "name": "delete_event",
+                    "parameters_json_schema": {
+                      "properties": {
+                        "event_id": {
+                          "title": "Event Id",
+                          "type": "string"
+                        },
+                        "confirmed": {
+                          "title": "Confirmed",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "event_id",
+                        "confirmed"
+                      ],
+                      "title": "delete_eventParams",
+                      "type": "object"
+                    },
+                    "response_json_schema": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  }
+                ]
+              }
+            ],
+            "sub_agents": []
+          }
+        },
+        "turns": [
+          {
+            "turn_index": 0,
+            "turn_id": "turn_0",
+            "events": [
+              {
+                "author": "root_agent",
+                "content": {
+                  "parts": [
+                    {
+                      "text": "Hello! I am your calendar and meeting scheduling assistant. Here is how I can help you:\n\n- **Check Availability:** Find out if you have free time or conflicting commitments for any proposed time slot.\n- **View Schedule:** List and search for upcoming events, meetings, and appointments on your calendar.\n- **Schedule Meetings:** Plan and book new calendar events with titles, descriptions, and attendees (after your review and confirmation).\n- **Reschedule & Update:** Modify existing meeting times, summaries, or details.\n- **Cancel Events:** Remove or cancel meetings you no longer need.\n\nHow can I assist you with your calendar today?"
+                    }
+                  ],
+                  "role": "model"
+                },
+                "event_time": "2026-09-04T20:50:52.852756Z"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

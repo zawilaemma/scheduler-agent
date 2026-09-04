@@ -1,0 +1,25 @@
+{
+  "eval_cases": [
+    {
+      "eval_case_id": "greeting",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "Hello, what can you help me with?"}]
+      }
+    },
+    {
+      "eval_case_id": "availability_check",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "Can you check if I have any meetings tomorrow afternoon between 2 PM and 4 PM?"}]
+      }
+    },
+    {
+      "eval_case_id": "schedule_request_requires_confirmation",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "Please schedule a 30-minute sync with Alex (alex@example.com) on Friday at 3 PM to review the project roadmap."}]
+      }
+    }
+  ]
+}
