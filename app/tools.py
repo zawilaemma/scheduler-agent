@@ -43,7 +43,14 @@ def negotiate_creds(tool_context: ToolContext) -> Credentials | dict:
     2. Check for auth response from the ADK OAuth flow.
     3. If nothing is available, request credentials from user.
     """
-    logger.info("Negotiating credentials using OAuth 2.0")
+    logger.info(
+        "Negotiating credentials using OAuth 2.0",
+        extra={
+            "event": "auth_negotiation_start",
+            "intended_outcome": "Resolve valid Google Calendar OAuth 2.0 credentials",
+            "actual_outcome": "Starting credential resolution across cached tokens, ADK auth flow, and user consent",
+        },
+    )
 
     # --- Stage 1: Check for cached / injected token ---
     cached_token = tool_context.state.get(auths.TOKEN_CACHE_KEY)
@@ -51,20 +58,50 @@ def negotiate_creds(tool_context: ToolContext) -> Credentials | dict:
         cached_token = tool_context.state.get(f"temp:{auths.TOKEN_CACHE_KEY}")
 
     if cached_token:
-        logger.debug("Found cached token in tool context state")
+        logger.debug(
+            "Found cached token in tool context state",
+            extra={
+                "event": "auth_cache_found",
+                "intended_outcome": "Check tool context state for cached OAuth token",
+                "actual_outcome": "Found cached token in tool context state",
+            },
+        )
         if isinstance(cached_token, dict):
             try:
                 creds = Credentials.from_authorized_user_info(
                     cached_token, list(auths.SCOPES.keys())
                 )
                 if creds.valid:
+                    logger.info(
+                        "Cached OAuth credentials are valid",
+                        extra={
+                            "event": "auth_cache_valid",
+                            "intended_outcome": "Validate cached OAuth credentials",
+                            "actual_outcome": "Cached credentials are valid and ready for use",
+                        },
+                    )
                     return creds
                 if creds.expired and creds.refresh_token:
                     creds.refresh(Request())
                     tool_context.state[auths.TOKEN_CACHE_KEY] = json.loads(creds.to_json())
+                    logger.info(
+                        "Cached OAuth credentials refreshed successfully",
+                        extra={
+                            "event": "auth_cache_refreshed",
+                            "intended_outcome": "Refresh expired cached credentials using refresh token",
+                            "actual_outcome": "Successfully refreshed expired credentials and saved to tool context state",
+                        },
+                    )
                     return creds
             except Exception as error:
-                logger.error(f"Error refreshing credentials: {error}")
+                logger.error(
+                    f"Error refreshing credentials: {error}",
+                    extra={
+                        "event": "auth_refresh_error",
+                        "intended_outcome": "Refresh expired cached credentials",
+                        "actual_outcome": f"Failed to refresh credentials: {error}",
+                    },
+                )
                 tool_context.state[auths.TOKEN_CACHE_KEY] = None
 
         elif isinstance(cached_token, str):
@@ -85,18 +122,41 @@ def negotiate_creds(tool_context: ToolContext) -> Credentials | dict:
             scopes=list(auth_scheme.flows.authorizationCode.scopes.keys()),
         )
         tool_context.state[auths.TOKEN_CACHE_KEY] = json.loads(creds.to_json())
+        logger.info(
+            "OAuth credentials obtained via ADK OAuth exchange",
+            extra={
+                "event": "auth_flow_exchanged",
+                "intended_outcome": "Exchange authorization code for OAuth tokens",
+                "actual_outcome": "Successfully obtained credentials and saved to state",
+            },
+        )
         return creds
 
     # --- Stage 3: Initiate OAuth flow ---
     client_id = getattr(auths.AUTH_CREDENTIAL.oauth2, "client_id", "")
     client_secret = getattr(auths.AUTH_CREDENTIAL.oauth2, "client_secret", "")
     if not (client_id and client_secret):
-        logger.info("OAuth client credentials not configured; awaiting setup.")
+        logger.info(
+            "OAuth client credentials not configured; awaiting setup.",
+            extra={
+                "event": "auth_unconfigured",
+                "intended_outcome": "Initiate OAuth consent flow with client ID/secret",
+                "actual_outcome": "OAuth client credentials not configured in environment; awaiting setup",
+            },
+        )
         return {
             "pending": True,
             "message": "Google Calendar authentication requires OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET in the environment.",
         }
 
+    logger.info(
+        "Requesting user credentials for Google Calendar OAuth consent",
+        extra={
+            "event": "auth_request_initiated",
+            "intended_outcome": "Prompt user for Google Calendar OAuth authorization",
+            "actual_outcome": "Requested credential from tool context; awaiting user authentication",
+        },
+    )
     tool_context.request_credential(auths.AUTH_CONFIG)
     return {"pending": True, "message": "Awaiting user authentication with Google Calendar"}
 
@@ -173,9 +233,27 @@ def list_events(start_time: str, end_time: str, query: str, tool_context: ToolCo
                     "attendees": [att.get("email") for att in item.get("attendees", []) if "email" in att],
                     "htmlLink": item.get("htmlLink", ""),
                 })
+            logger.info(
+                f"Retrieved {len(formatted)} calendar event(s)",
+                extra={
+                    "event": "calendar_list_events_success",
+                    "tool_name": "list_events",
+                    "intended_outcome": f"Retrieve calendar events between {start_time} and {end_time}" + (f" matching '{query}'" if query else ""),
+                    "actual_outcome": f"Successfully retrieved {len(formatted)} event(s) from Google Calendar API",
+                    "count": len(formatted),
+                },
+            )
             return {"status": "success", "count": len(formatted), "events": formatted}
         except Exception as e:
-            logger.error(f"Error querying Google Calendar API: {e}")
+            logger.error(
+                f"Error querying Google Calendar API: {e}",
+                extra={
+                    "event": "calendar_list_events_error",
+                    "tool_name": "list_events",
+                    "intended_outcome": f"Retrieve calendar events between {start_time} and {end_time}" + (f" matching '{query}'" if query else ""),
+                    "actual_outcome": f"Failed to query Google Calendar API: {e}",
+                },
+            )
             return {"status": "error", "message": f"Failed to list events: {e!s}"}
 
     # Local mock mode
@@ -197,6 +275,16 @@ def list_events(start_time: str, end_time: str, query: str, tool_context: ToolCo
                 continue
         results.append(ev)
 
+    logger.info(
+        f"Retrieved {len(results)} mock calendar event(s)",
+        extra={
+            "event": "calendar_list_events_mock_success",
+            "tool_name": "list_events",
+            "intended_outcome": f"Retrieve calendar events between {start_time} and {end_time}" + (f" matching '{query}'" if query else ""),
+            "actual_outcome": f"Successfully retrieved {len(results)} event(s) from mock calendar",
+            "count": len(results),
+        },
+    )
     return {"status": "success", "count": len(results), "events": results}
 
 
@@ -217,6 +305,17 @@ def check_availability(start_time: str, end_time: str, tool_context: ToolContext
     conflicts = events_res.get("events", [])
     is_available = len(conflicts) == 0
 
+    logger.info(
+        f"Availability check complete: {'available' if is_available else 'conflicted'} ({len(conflicts)} conflict(s))",
+        extra={
+            "event": "calendar_check_availability",
+            "tool_name": "check_availability",
+            "intended_outcome": f"Check user calendar availability for proposed slot {start_time} to {end_time}",
+            "actual_outcome": f"Slot is {'available' if is_available else 'conflicted'} with {len(conflicts)} conflict(s)",
+            "is_available": is_available,
+            "conflicts_count": len(conflicts),
+        },
+    )
     return {
         "status": "success",
         "is_available": is_available,
@@ -248,6 +347,16 @@ def create_event(
         dict with status, event details, and confirmation message.
     """
     if not confirmed:
+        logger.info(
+            f"Meeting booking '{summary}' awaiting user confirmation",
+            extra={
+                "event": "calendar_create_event_pending",
+                "tool_name": "create_event",
+                "intended_outcome": f"Schedule calendar event '{summary}' from {start_time} to {end_time}",
+                "actual_outcome": "Creation blocked pending explicit user confirmation; presented event draft",
+                "confirmed": False,
+            },
+        )
         return {
             "status": "pending_confirmation",
             "message": (
@@ -286,6 +395,17 @@ def create_event(
                 body["attendees"] = parsed_attendees
 
             created = service.events().insert(calendarId="primary", body=body).execute()
+            logger.info(
+                f"Successfully scheduled meeting '{summary}' in Google Calendar",
+                extra={
+                    "event": "calendar_create_event_success",
+                    "tool_name": "create_event",
+                    "intended_outcome": f"Schedule calendar event '{summary}' from {start_time} to {end_time} with attendees: {attendees or 'None'}",
+                    "actual_outcome": f"Successfully scheduled meeting '{summary}' (ID: {created.get('id')})",
+                    "event_id": created.get("id"),
+                    "confirmed": True,
+                },
+            )
             return {
                 "status": "success",
                 "message": f"Successfully scheduled meeting '{summary}'.",
@@ -298,7 +418,15 @@ def create_event(
                 },
             }
         except Exception as e:
-            logger.error(f"Error creating event in Google Calendar: {e}")
+            logger.error(
+                f"Error creating event in Google Calendar: {e}",
+                extra={
+                    "event": "calendar_create_event_error",
+                    "tool_name": "create_event",
+                    "intended_outcome": f"Schedule calendar event '{summary}' from {start_time} to {end_time}",
+                    "actual_outcome": f"Failed to create event in Google Calendar: {e}",
+                },
+            )
             return {"status": "error", "message": f"Failed to create event: {e!s}"}
 
     # Local mock mode
@@ -314,6 +442,17 @@ def create_event(
         "htmlLink": f"https://calendar.google.com/calendar/event?eid={event_id}",
     }
     mock_events.append(new_event)
+    logger.info(
+        f"Successfully scheduled mock meeting '{summary}'",
+        extra={
+            "event": "calendar_create_event_mock_success",
+            "tool_name": "create_event",
+            "intended_outcome": f"Schedule calendar event '{summary}' from {start_time} to {end_time} with attendees: {attendees or 'None'}",
+            "actual_outcome": f"Successfully scheduled mock meeting '{summary}' (ID: {event_id})",
+            "event_id": event_id,
+            "confirmed": True,
+        },
+    )
     return {
         "status": "success",
         "message": f"Successfully scheduled meeting '{summary}'.",
@@ -344,6 +483,17 @@ def update_event(
         dict with status and updated event details.
     """
     if not confirmed:
+        logger.info(
+            f"Event update for ID '{event_id}' awaiting user confirmation",
+            extra={
+                "event": "calendar_update_event_pending",
+                "tool_name": "update_event",
+                "intended_outcome": f"Update calendar event with ID '{event_id}'",
+                "actual_outcome": "Action requires explicit user confirmation before update; update draft returned",
+                "event_id": event_id,
+                "confirmed": False,
+            },
+        )
         return {
             "status": "pending_confirmation",
             "message": (
@@ -376,13 +526,33 @@ def update_event(
                 body["end"] = {"dateTime": end_time}
 
             updated = service.events().patch(calendarId="primary", eventId=event_id, body=body).execute()
+            logger.info(
+                f"Successfully updated meeting '{updated.get('summary')}' (ID: {event_id})",
+                extra={
+                    "event": "calendar_update_event_success",
+                    "tool_name": "update_event",
+                    "intended_outcome": f"Update calendar event with ID '{event_id}'",
+                    "actual_outcome": f"Successfully updated meeting '{updated.get('summary')}'",
+                    "event_id": event_id,
+                    "confirmed": True,
+                },
+            )
             return {
                 "status": "success",
                 "message": f"Successfully updated meeting '{updated.get('summary')}'.",
                 "event": updated,
             }
         except Exception as e:
-            logger.error(f"Error updating event in Google Calendar: {e}")
+            logger.error(
+                f"Error updating event in Google Calendar: {e}",
+                extra={
+                    "event": "calendar_update_event_error",
+                    "tool_name": "update_event",
+                    "intended_outcome": f"Update calendar event with ID '{event_id}'",
+                    "actual_outcome": f"Failed to update event in Google Calendar: {e}",
+                    "event_id": event_id,
+                },
+            )
             return {"status": "error", "message": f"Failed to update event: {e!s}"}
 
     # Local mock mode
@@ -397,12 +567,33 @@ def update_event(
                 ev["start"] = {"dateTime": start_time}
             if end_time:
                 ev["end"] = {"dateTime": end_time}
+            logger.info(
+                f"Successfully updated mock meeting '{ev.get('summary')}' (ID: {event_id})",
+                extra={
+                    "event": "calendar_update_event_mock_success",
+                    "tool_name": "update_event",
+                    "intended_outcome": f"Update calendar event with ID '{event_id}'",
+                    "actual_outcome": f"Successfully updated mock meeting '{ev.get('summary')}'",
+                    "event_id": event_id,
+                    "confirmed": True,
+                },
+            )
             return {
                 "status": "success",
                 "message": f"Successfully updated meeting '{ev.get('summary')}'.",
                 "event": ev,
             }
 
+    logger.warning(
+        f"Event with ID '{event_id}' not found for update",
+        extra={
+            "event": "calendar_update_event_not_found",
+            "tool_name": "update_event",
+            "intended_outcome": f"Update calendar event with ID '{event_id}'",
+            "actual_outcome": f"Event with ID '{event_id}' not found",
+            "event_id": event_id,
+        },
+    )
     return {"status": "error", "message": f"Event with ID '{event_id}' not found."}
 
 
@@ -421,6 +612,17 @@ def delete_event(
         dict with status and cancellation message.
     """
     if not confirmed:
+        logger.info(
+            f"Event deletion for ID '{event_id}' awaiting user confirmation",
+            extra={
+                "event": "calendar_delete_event_pending",
+                "tool_name": "delete_event",
+                "intended_outcome": f"Delete calendar event with ID '{event_id}'",
+                "actual_outcome": "Action requires explicit user confirmation before deletion",
+                "event_id": event_id,
+                "confirmed": False,
+            },
+        )
         return {
             "status": "pending_confirmation",
             "message": (
@@ -436,12 +638,32 @@ def delete_event(
     if service is not None:
         try:
             service.events().delete(calendarId="primary", eventId=event_id).execute()
+            logger.info(
+                f"Successfully deleted event with ID '{event_id}'",
+                extra={
+                    "event": "calendar_delete_event_success",
+                    "tool_name": "delete_event",
+                    "intended_outcome": f"Delete calendar event with ID '{event_id}'",
+                    "actual_outcome": f"Successfully deleted event with ID '{event_id}'",
+                    "event_id": event_id,
+                    "confirmed": True,
+                },
+            )
             return {
                 "status": "success",
                 "message": f"Successfully deleted event with ID '{event_id}'.",
             }
         except Exception as e:
-            logger.error(f"Error deleting event in Google Calendar: {e}")
+            logger.error(
+                f"Error deleting event in Google Calendar: {e}",
+                extra={
+                    "event": "calendar_delete_event_error",
+                    "tool_name": "delete_event",
+                    "intended_outcome": f"Delete calendar event with ID '{event_id}'",
+                    "actual_outcome": f"Failed to delete event in Google Calendar: {e}",
+                    "event_id": event_id,
+                },
+            )
             return {"status": "error", "message": f"Failed to delete event: {e!s}"}
 
     # Local mock mode
@@ -449,9 +671,30 @@ def delete_event(
     for i, ev in enumerate(mock_events):
         if ev.get("id") == event_id:
             removed = mock_events.pop(i)
+            logger.info(
+                f"Successfully deleted mock event '{removed.get('summary')}' (ID: {event_id})",
+                extra={
+                    "event": "calendar_delete_event_mock_success",
+                    "tool_name": "delete_event",
+                    "intended_outcome": f"Delete calendar event with ID '{event_id}'",
+                    "actual_outcome": f"Successfully deleted mock event '{removed.get('summary')}' (ID: {event_id})",
+                    "event_id": event_id,
+                    "confirmed": True,
+                },
+            )
             return {
                 "status": "success",
                 "message": f"Successfully deleted event '{removed.get('summary')}' (ID: {event_id}).",
             }
 
+    logger.warning(
+        f"Event with ID '{event_id}' not found for deletion",
+        extra={
+            "event": "calendar_delete_event_not_found",
+            "tool_name": "delete_event",
+            "intended_outcome": f"Delete calendar event with ID '{event_id}'",
+            "actual_outcome": f"Event with ID '{event_id}' not found",
+            "event_id": event_id,
+        },
+    )
     return {"status": "error", "message": f"Event with ID '{event_id}' not found."}

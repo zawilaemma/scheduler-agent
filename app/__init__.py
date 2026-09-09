@@ -13,5 +13,8 @@
 # limitations under the License.
 
 from .agent import app
+from .logging_config import redact_pii, setup_logging
 
-__all__ = ["app"]
+setup_logging()
+
+__all__ = ["app", "redact_pii", "setup_logging"]

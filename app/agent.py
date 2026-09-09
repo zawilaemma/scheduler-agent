@@ -15,7 +15,10 @@
 
 import datetime
 import json
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from google.adk.agents import Agent
 from google.adk.agents.callback_context import CallbackContext
@@ -92,12 +95,26 @@ ROLES & RESPONSIBILITIES:
 """
 
 
-# Define the callback that triggers Memory Bank extraction
 async def add_session_to_memory_callback(callback_context: CallbackContext):
     try:
         await callback_context.add_session_to_memory()
-    except (ValueError, AttributeError):
-        pass
+        logger.info(
+            "Session added to memory bank",
+            extra={
+                "event": "memory_bank_session_saved",
+                "intended_outcome": f"Save session '{callback_context.session_id}' to memory bank",
+                "actual_outcome": f"Successfully stored session '{callback_context.session_id}' in memory bank",
+            },
+        )
+    except (ValueError, AttributeError) as e:
+        logger.debug(
+            f"Memory bank extraction skipped: {e}",
+            extra={
+                "event": "memory_bank_session_skip",
+                "intended_outcome": f"Save session '{callback_context.session_id}' to memory bank",
+                "actual_outcome": f"Memory bank not configured or unavailable: {e}",
+            },
+        )
     return None
 
 
@@ -212,7 +229,26 @@ def route_user_request(node_input: Any) -> Event:
         text = str(node_input)
 
     if is_focus_time_request(text):
+        logger.info(
+            f"Routing user request to {FOCUS_TIME_ROUTE}",
+            extra={
+                "event": "workflow_routing",
+                "route": FOCUS_TIME_ROUTE,
+                "intended_outcome": "Route user request to the appropriate specialized sub-agent",
+                "actual_outcome": f"Identified focus time task request; routed to '{FOCUS_TIME_ROUTE}'",
+            },
+        )
         return Event(route=FOCUS_TIME_ROUTE, output=node_input)
+
+    logger.info(
+        f"Routing user request to {CALENDAR_EVENT_ROUTE}",
+        extra={
+            "event": "workflow_routing",
+            "route": CALENDAR_EVENT_ROUTE,
+            "intended_outcome": "Route user request to the appropriate specialized sub-agent",
+            "actual_outcome": f"Identified calendar operation; routed directly to '{CALENDAR_EVENT_ROUTE}'",
+        },
+    )
     return Event(route=CALENDAR_EVENT_ROUTE, output=node_input)
 
 
@@ -244,7 +280,7 @@ app = App(
         event_retention_size=5,
         summarizer=LlmEventSummarizer(
             llm=Gemini(
-                model=MODEL,
+                model=FLASH_MODEL,
                 retry_options=types.HttpRetryOptions(attempts=3),
             )
         ),
