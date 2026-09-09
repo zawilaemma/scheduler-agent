@@ -36,8 +36,8 @@ from app.tools import (
     update_event,
 )
 
-MODEL = "gemini-3.7-flash"
-
+FLASH_MODEL = "gemini-3.7-flash"
+PRO_MODEL = "gemini-3-pro-preview"
 
 SCHEDULER_INSTRUCTION = """You are an intelligent calendar and meeting scheduling assistant.
 You help users manage their calendar: checking availability, listing scheduled events, booking meetings, rescheduling, and canceling events.
@@ -109,7 +109,7 @@ scheduler_agent = Agent(
         "rescheduling, and canceling/deleting events."
     ),
     model=Gemini(
-        model=MODEL,
+        model=FLASH_MODEL,
         retry_options=types.HttpRetryOptions(attempts=3),
     ),
     instruction=SCHEDULER_INSTRUCTION,
@@ -132,7 +132,7 @@ task_scheduler_agent = Agent(
         "estimates how long each task will take, and schedules focus time using scheduler_agent."
     ),
     model=Gemini(
-        model=MODEL,
+        model=PRO_MODEL,
         retry_options=types.HttpRetryOptions(attempts=3),
     ),
     instruction=TASK_SCHEDULER_INSTRUCTION,

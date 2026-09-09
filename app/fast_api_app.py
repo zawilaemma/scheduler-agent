@@ -27,6 +27,7 @@ from app.app_utils.a2a import attach_a2a_routes
 from app.app_utils.reasoning_engine_adapter import (
     attach_reasoning_engine_routes,
 )
+from google.adk.plugins import LoggingPlugin
 
 load_dotenv()
 otel_to_cloud = os.environ.get(
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         session_service=services.get_session_service(),
         artifact_service=services.get_artifact_service(),
         auto_create_session=True,
+        plugins=[LoggingPlugin()],
     )
     # Shared by the A2A path and the reasoning_engine adapter routes.
     app.state.runner = runner
