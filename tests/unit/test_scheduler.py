@@ -18,8 +18,19 @@ from unittest.mock import MagicMock
 
 import pytest
 from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
+from google.adk.tools import AgentTool
+from google.adk.workflow import Workflow
 
-from app.agent import app, root_agent
+from app.agent import (
+    CALENDAR_EVENT_ROUTE,
+    FOCUS_TIME_ROUTE,
+    app,
+    is_focus_time_request,
+    root_agent,
+    route_user_request,
+    scheduler_agent,
+    task_scheduler_agent,
+)
 from app.tools import (
     check_availability,
     create_event,
@@ -43,16 +54,95 @@ class DummyToolContext:
 
 
 def test_agent_structure():
-    """Verify root_agent and app are properly configured."""
+    """Verify root_agent (Workflow), scheduler_agent, and task_scheduler_agent are properly configured."""
+    # root_agent is a Workflow agent
+    assert isinstance(root_agent, Workflow)
     assert root_agent.name == "root_agent"
     assert app.name == "app"
-    assert len(root_agent.tools) == 5
-    tool_names = [getattr(t, "__name__", str(t)) for t in root_agent.tools]
+    assert app.root_agent == root_agent
+
+    # scheduler_agent has the 5 calendar tools
+    assert scheduler_agent.name == "scheduler_agent"
+    assert len(scheduler_agent.tools) == 5
+    tool_names = [getattr(t, "__name__", str(t)) for t in scheduler_agent.tools]
     assert "list_events" in tool_names
     assert "check_availability" in tool_names
     assert "create_event" in tool_names
     assert "update_event" in tool_names
     assert "delete_event" in tool_names
+
+    # task_scheduler_agent has scheduler_agent as an AgentTool
+    assert task_scheduler_agent.name == "task_scheduler_agent"
+    assert len(task_scheduler_agent.tools) == 1
+    assert isinstance(task_scheduler_agent.tools[0], AgentTool)
+    assert task_scheduler_agent.tools[0].agent.name == "scheduler_agent"
+
+    # Verify workflow graph edges and routing
+    edge_pairs = [(e.from_node.name, e.to_node.name, e.route) for e in root_agent.graph.edges]
+    assert ("__START__", "route_user_request", None) in edge_pairs
+    assert ("route_user_request", "task_scheduler_agent", FOCUS_TIME_ROUTE) in edge_pairs
+    assert ("route_user_request", "scheduler_agent", CALENDAR_EVENT_ROUTE) in edge_pairs
+
+
+def test_route_focus_time_requests():
+    """Verify requests to schedule focus time for tasks route to task_scheduler_agent."""
+    focus_queries = [
+        "Schedule focus time for writing tests",
+        "I need 2 hours of focus time to complete the design doc",
+        "Please schedule focus time for a given task",
+        "Set aside focus time for bug fixes and code review",
+        "Prioritize my tasks and schedule focus time",
+        "Can you schedule a focus block tomorrow morning for deep work?",
+    ]
+    for query in focus_queries:
+        assert is_focus_time_request(query) is True
+        event = route_user_request(query)
+        assert event.actions.route == FOCUS_TIME_ROUTE
+
+
+def test_route_calendar_event_requests():
+    """Verify requests to schedule/list/remove calendar events route directly to scheduler_agent."""
+    calendar_queries = [
+        "Schedule a meeting with Alex on Friday at 3 PM",
+        "Book a 30-minute sync with the product team tomorrow at 10 AM",
+        "List all my calendar events for today",
+        "Show my upcoming meetings for this week",
+        "Remove the team standup on Friday",
+        "Delete the event with ID 123",
+        "Cancel my 2 PM appointment",
+        "Update the meeting at 4 PM to 5 PM",
+        "Check my availability on Monday morning",
+    ]
+    for query in calendar_queries:
+        assert is_focus_time_request(query) is False
+        event = route_user_request(query)
+        assert event.actions.route == CALENDAR_EVENT_ROUTE
+
+
+def test_route_user_request_content_types():
+    """Verify route_user_request handles types.Content and dict inputs properly."""
+    from google.genai import types
+
+    content_focus = types.Content(
+        role="user",
+        parts=[types.Part.from_text(text="Schedule focus time for sprint backlog tasks")],
+    )
+    event1 = route_user_request(content_focus)
+    assert event1.actions.route == FOCUS_TIME_ROUTE
+    assert event1.output == content_focus
+
+    content_calendar = types.Content(
+        role="user",
+        parts=[types.Part.from_text(text="List my calendar events for tomorrow")],
+    )
+    event2 = route_user_request(content_calendar)
+    assert event2.actions.route == CALENDAR_EVENT_ROUTE
+    assert event2.output == content_calendar
+
+    dict_focus = {"text": "Schedule focus time for writing documentation"}
+    event3 = route_user_request(dict_focus)
+    assert event3.actions.route == FOCUS_TIME_ROUTE
+    assert event3.output == dict_focus
 
 
 def test_context_compaction_configured():
